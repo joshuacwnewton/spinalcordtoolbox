@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: [ self-hosted, linux ]
+    runs-on: [ ubuntu-18.04 ]
     container:
       image: python:3.6
     steps:
@@ -21,7 +21,7 @@ jobs:
       run: pytest
 
   build-and-test-extended:
-    runs-on: [ self-hosted, linux ]
+    runs-on: [ ubuntu-18.04]
     container:
       image: python:3.6
     steps:
@@ -34,7 +34,7 @@ jobs:
       run: ./batch_processing.sh
 
   build-and-test-macos:
-    runs-on: [ self-hosted, macOS ]
+    runs-on: [ macos-10.15 ]
     steps:
     - uses: actions/checkout@v2
     - name: Install dependencies
@@ -45,7 +45,7 @@ jobs:
       run: python -m pytest
 
   build-and-test-w10-wsl:
-    runs-on: [ self-hosted, w10, wsl ]
+    runs-on: [ windows-2019 ]
     steps:
     - uses: actions/checkout@v2
     - name: Install dependencies
