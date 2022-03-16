@@ -10,15 +10,13 @@ import numpy as np
 from skimage.exposure import rescale_intensity
 from scipy.ndimage.measurements import center_of_mass, label
 from scipy.ndimage import distance_transform_edt
+import onnxruntime as ort
 
 from spinalcordtoolbox import resampling
-from .cnn_models import nn_architecture_seg, nn_architecture_ctr
 from .postprocessing import post_processing_volume_wise, keep_largest_object, fill_holes_2d
 from spinalcordtoolbox.image import Image, empty_like, change_type, zeros_like, add_suffix, concat_data, split_img_data
 from spinalcordtoolbox.centerline.core import ParamCenterline, get_centerline, _call_viewer_centerline
 from spinalcordtoolbox.utils import sct_dir_local_path, TempFolder
-from spinalcordtoolbox.deepseg_sc.cnn_models_3d import load_trained_model
-
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 BATCH_SIZE = 4
@@ -26,6 +24,8 @@ BATCH_SIZE = 4
 # minimizing the standard deviation of cross-sectional area across contrasts. For more details, see:
 # https://github.com/sct-pipeline/deepseg-threshold
 THR_DEEPSEG = {'t1': 0.15, 't2': 0.7, 't2s': 0.89, 'dwi': 0.01}
+CTR_OUTPUT_CHANNEL = {'t1': ['activation_12'], 't2': ['activation_11'],
+                      't2s': ['activation_12'], 'dwi': ['activation_11']}
 
 logger = logging.getLogger(__name__)
 
@@ -75,23 +75,12 @@ def find_centerline(algo, image_fname, contrast_type, brain_bool, folder_output,
                           'dwi': {'features': 8, 'dilation_layers': 2}}
 
         # load model
-        ctr_model_fname = sct_dir_local_path('data', 'deepseg_sc_models', '{}_ctr.h5'.format(contrast_type))
-        ctr_model = nn_architecture_ctr(height=dct_patch_ctr[contrast_type]['size'][0],
-                                        width=dct_patch_ctr[contrast_type]['size'][1],
-                                        channels=1,
-                                        classes=1,
-                                        features=dct_params_ctr[contrast_type]['features'],
-                                        depth=2,
-                                        temperature=1.0,
-                                        padding='same',
-                                        batchnorm=True,
-                                        dropout=0.0,
-                                        dilation_layers=dct_params_ctr[contrast_type]['dilation_layers'])
-        ctr_model.load_weights(ctr_model_fname)
-
+        ctr_model_fname = sct_dir_local_path('data', 'deepseg_sc_models', '{}_ctr.onnx'.format(contrast_type))
+        ort_sess = ort.InferenceSession(ctr_model_fname)
         # compute the heatmap
         im_heatmap, z_max = heatmap(im=im,
-                                    model=ctr_model,
+                                    contrast_type=contrast_type,
+                                    model=ort_sess,
                                     patch_shape=dct_patch_ctr[contrast_type]['size'],
                                     mean_train=dct_patch_ctr[contrast_type]['mean'],
                                     std_train=dct_patch_ctr[contrast_type]['std'],
@@ -186,7 +175,7 @@ def crop_image_around_centerline(im_in, ctr_in, crop_size):
     return x_lst, y_lst, z_lst, im_new
 
 
-def scan_slice(z_slice, model, mean_train, std_train, coord_lst, patch_shape, z_out_dim):
+def scan_slice(z_slice, contrast_type, model, mean_train, std_train, coord_lst, patch_shape, z_out_dim):
     """Scan the entire axial slice to detect the centerline."""
     z_slice_out = np.zeros(z_out_dim)
     sum_lst = []
@@ -195,7 +184,8 @@ def scan_slice(z_slice, model, mean_train, std_train, coord_lst, patch_shape, z_
         block = z_slice[coord[0]:coord[2], coord[1]:coord[3]]
         block_nn = np.expand_dims(np.expand_dims(block, 0), -1)
         block_nn_norm = _normalize_data(block_nn, mean_train, std_train)
-        block_pred = model.predict(block_nn_norm, batch_size=BATCH_SIZE)
+        block_pred = model.run(output_names=CTR_OUTPUT_CHANNEL[contrast_type],
+                               input_feed={"input_1": block_nn_norm})[0]
 
         if coord[2] > z_out_dim[0]:
             x_end = patch_shape[0] - (coord[2] - z_out_dim[0])
@@ -226,7 +216,7 @@ def scan_slice(z_slice, model, mean_train, std_train, coord_lst, patch_shape, z_
     return z_slice_out, x_CoM, y_CoM, coord_lst
 
 
-def heatmap(im, model, patch_shape, mean_train, std_train, brain_bool=True):
+def heatmap(im, contrast_type, model, patch_shape, mean_train, std_train, brain_bool=True):
     """Compute the heatmap with CNN_1 representing the SC localization."""
     data_im = im.data.astype(np.float32)
     im_out = change_type(im, "uint8")
@@ -266,7 +256,8 @@ def heatmap(im, model, patch_shape, mean_train, std_train, brain_bool=True):
             block = data_im[x_0:x_1, y_0:y_1, zz]
             block_nn = np.expand_dims(np.expand_dims(block, 0), -1)
             block_nn_norm = _normalize_data(block_nn, mean_train, std_train)
-            block_pred = model.predict(block_nn_norm, batch_size=BATCH_SIZE)
+            block_pred = model.run(output_names=CTR_OUTPUT_CHANNEL[contrast_type],
+                                   input_feed={"input_1": block_nn_norm})[0]
 
             # coordinates manipulation due to the above padding and cropping
             if x_1 > data.shape[0]:
@@ -295,7 +286,7 @@ def heatmap(im, model, patch_shape, mean_train, std_train, brain_bool=True):
         # if the SC was not detected at zz-1 or on the patch centered around CoM in slice zz, the entire cross-sectional
         # slice is scanned
         if x_CoM is None:
-            z_slice, x_CoM, y_CoM, coord_lst = scan_slice(data_im[:, :, zz], model,
+            z_slice, x_CoM, y_CoM, coord_lst = scan_slice(data_im[:, :, zz], contrast_type, model,
                                                           mean_train, std_train,
                                                           coord_lst, patch_shape, data.shape[:2])
             data[:, :, zz] = z_slice
@@ -338,13 +329,9 @@ def segment_2d(model_fname, contrast_type, input_size, im_in):
 
     :return: seg_crop.data: ndarray float32: Output prediction
     """
-    seg_model = nn_architecture_seg(height=input_size[0],
-                                    width=input_size[1],
-                                    depth=2 if contrast_type != 't2' else 3,
-                                    features=32,
-                                    batchnorm=False,
-                                    dropout=0.0)
-    seg_model.load_weights(model_fname)
+    output_channel = {'t1': ['activation_11'], 't2': ['activation_15'],
+                      't2s': ['activation_11'], 'dwi': ['activation_11']}
+    ort_sess = ort.InferenceSession(model_fname)
 
     seg_crop = zeros_like(im_in, dtype=np.float32)
 
@@ -352,8 +339,8 @@ def segment_2d(model_fname, contrast_type, input_size, im_in):
     # TODO: use sct_progress_bar
     for zz in range(im_in.dim[2]):
         # 2D CNN prediction
-        pred_seg = seg_model.predict(np.expand_dims(np.expand_dims(data_norm[:, :, zz], -1), 0),
-                                     batch_size=BATCH_SIZE)[0, :, :, 0]
+        x = np.expand_dims(np.expand_dims(data_norm[:, :, zz], -1), 0)
+        pred_seg = ort_sess.run(output_names=output_channel[contrast_type], input_feed={"input_1": x})[0][0, :, :, 0]
         seg_crop.data[:, :, zz] = pred_seg
 
     return seg_crop.data
@@ -369,7 +356,8 @@ def segment_3d(model_fname, contrast_type, im_in):
                        't2s': {'size': (96, 96, 48), 'mean': 87.0212, 'std': 64.425},
                        't1': {'size': (64, 64, 48), 'mean': 88.5001, 'std': 66.275}}
     # load 3d model
-    seg_model = load_trained_model(model_fname)
+    ort_sess = ort.InferenceSession(model_fname)
+
 
     out = zeros_like(im_in, dtype=np.float32)
 
@@ -389,10 +377,10 @@ def segment_3d(model_fname, contrast_type, im_in):
         if np.any(patch_im):  # Check if the patch is (not) empty, which could occur after a brain detection.
             patch_norm = \
                 _normalize_data(patch_im, dct_patch_sc_3d[contrast_type]['mean'], dct_patch_sc_3d[contrast_type]['std'])
-            patch_pred_proba = \
-                seg_model.predict(np.expand_dims(np.expand_dims(patch_norm, 0), 0), batch_size=BATCH_SIZE)
+            x = np.expand_dims(np.expand_dims(patch_norm, 0), 0).astype(np.float32)
+            onnx_pred = ort_sess.run(output_names=["activation_7"], input_feed={"input_1": x})
             # pred_seg_th = (patch_pred_proba > 0.5).astype(int)[0, 0, :, :, :]
-            pred_seg_th = patch_pred_proba[0, 0, :, :, :]  # TODO: clarified variable (this is not thresholded!)
+            pred_seg_th = onnx_pred[0][0, 0, :, :, :]  # TODO: clarified variable (this is not thresholded!)
 
             # TODO: add comment about what the code is doing below
             if zz == z_step_keep[-1]:
@@ -499,7 +487,7 @@ def deep_segmentation_spinalcord(im_image, contrast_type, ctr_algo='cnn', ctr_fi
         # segment data using 2D convolutions
         logger.info("Segmenting the spinal cord using deep learning on 2D patches...")
         segmentation_model_fname = \
-            sct_dir_local_path('data', 'deepseg_sc_models', '{}_sc.h5'.format(contrast_type))
+            sct_dir_local_path('data', 'deepseg_sc_models', '{}_sc.onnx'.format(contrast_type))
         seg_crop = segment_2d(model_fname=segmentation_model_fname,
                               contrast_type=contrast_type,
                               input_size=(crop_size, crop_size),
@@ -508,7 +496,7 @@ def deep_segmentation_spinalcord(im_image, contrast_type, ctr_algo='cnn', ctr_fi
         # segment data using 3D convolutions
         logger.info("Segmenting the spinal cord using deep learning on 3D patches...")
         segmentation_model_fname = \
-            sct_dir_local_path('data', 'deepseg_sc_models', '{}_sc_3D.h5'.format(contrast_type))
+            sct_dir_local_path('data', 'deepseg_sc_models', '{}_sc_3D.onnx'.format(contrast_type))
         seg_crop = segment_3d(model_fname=segmentation_model_fname,
                               contrast_type=contrast_type,
                               im_in=im_norm_in)
