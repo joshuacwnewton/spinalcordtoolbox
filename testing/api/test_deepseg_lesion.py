@@ -19,7 +19,7 @@ def test_segment():
     model_path = os.path.join(__sct_dir__, 'data', 'deepseg_lesion_models', '{}_lesion.onnx'.format(contrast_test))
 
     # create fake data
-    data = np.zeros((48,48,96))
+    data = np.zeros((48, 48, 96))
     xx, yy = np.mgrid[:48, :48]
     circle = (xx - 24) ** 2 + (yy - 24) ** 2
     for zz in range(data.shape[2]):

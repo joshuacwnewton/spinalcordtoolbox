@@ -352,7 +352,6 @@ def segment_3d(model_fname, contrast_type, im_in):
     # load 3d model
     ort_sess = ort.InferenceSession(model_fname)
 
-
     out = zeros_like(im_in, dtype=np.float32)
 
     # segment the spinal cord
