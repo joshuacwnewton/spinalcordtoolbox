@@ -51,13 +51,16 @@ class ShapeTransform(object):
     def __init__(self, original_shape, transformed_shape):
         self.original_shape = original_shape
         self.transformed_shape = transformed_shape
+        self.pad_mode = "symmetric"
 
     def apply(self, image):
         """Transform the input image into the desired dimensions."""
+        self.pad_mode = "symmetric"  # Symmetry-pad if padding a smaller image to 200x200
         return self.transform(image, old_dim=self.original_shape, new_dim=self.transformed_shape)
 
     def undo(self, image):
         """Return the transformed image back into its original dimensions."""
+        self.pad_mode = "constant"  # Zero-pad if un-cropping an image to its original, larger dimensions
         return self.transform(image, old_dim=self.transformed_shape, new_dim=self.original_shape)
 
     def transform(self, image, old_dim, new_dim):
@@ -86,9 +89,9 @@ class ShapeTransform(object):
         pad_1 = new_dim // 2 - (old_dim // 2)
         pad_2 = new_dim - (pad_1 + old_dim)
         if axis == 0:
-            return np.pad(image, ((pad_1, pad_2), (0, 0)), mode="constant")
+            return np.pad(image, ((pad_1, pad_2), (0, 0)), mode=self.pad_mode)
         else:
-            return np.pad(image, ((0, 0), (pad_1, pad_2)), mode="constant")
+            return np.pad(image, ((0, 0), (pad_1, pad_2)), mode=self.pad_mode)
 
     def crop(self, image, old_dim, new_dim, axis=0):
         """Center crop a single image axis to match the requested dimension."""
