@@ -82,7 +82,6 @@ def segment_3d(model_fname, contrast_type, im):
     dct_patch_3d = {'t2': {'size': (48, 48, 48), 'mean': 871.309, 'std': 557.916},
                     't2_ax': {'size': (48, 48, 48), 'mean': 835.592, 'std': 528.386},
                     't2s': {'size': (48, 48, 48), 'mean': 1011.31, 'std': 678.985}}
-    onnx_out_name = {'t2': ['activation_11'], 't2_ax': ['activation_7'], 't2s': ['activation_11']}
 
     # load 3d model
     ort_sess = ort.InferenceSession(model_fname)
@@ -104,7 +103,7 @@ def segment_3d(model_fname, contrast_type, im):
         if np.any(patch_im):  # Check if the patch is (not) empty, which could occur after a brain detection.
             patch_norm = _normalize_data(patch_im, dct_patch_3d[contrast_type]['mean'], dct_patch_3d[contrast_type]['std'])
             x = np.expand_dims(np.expand_dims(patch_norm, 0), 0).astype(np.float32)
-            onnx_pred = ort_sess.run(output_names=onnx_out_name[contrast_type], input_feed={"input_1": x})
+            onnx_pred = ort_sess.run(output_names=["predictions"], input_feed={"input_1": x})
             pred_seg_th = (onnx_pred[0] > 0.1).astype(int)[0, 0, :, :, :]
             if zz == z_step_keep[-1]:
                 out_data[:, :, zz:] = pred_seg_th[:, :, :z_patch_extracted]

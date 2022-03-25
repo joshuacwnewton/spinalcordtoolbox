@@ -24,8 +24,6 @@ BATCH_SIZE = 4
 # minimizing the standard deviation of cross-sectional area across contrasts. For more details, see:
 # https://github.com/sct-pipeline/deepseg-threshold
 THR_DEEPSEG = {'t1': 0.15, 't2': 0.7, 't2s': 0.89, 'dwi': 0.01}
-CTR_OUTPUT_CHANNEL = {'t1': ['activation_12'], 't2': ['activation_11'],
-                      't2s': ['activation_12'], 'dwi': ['activation_11']}
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +182,7 @@ def scan_slice(z_slice, contrast_type, model, mean_train, std_train, coord_lst, 
         block = z_slice[coord[0]:coord[2], coord[1]:coord[3]]
         block_nn = np.expand_dims(np.expand_dims(block, 0), -1)
         block_nn_norm = _normalize_data(block_nn, mean_train, std_train)
-        block_pred = model.run(output_names=CTR_OUTPUT_CHANNEL[contrast_type],
-                               input_feed={"input_1": block_nn_norm})[0]
+        block_pred = model.run(output_names=["predictions"], input_feed={"input_1": block_nn_norm})[0]
 
         if coord[2] > z_out_dim[0]:
             x_end = patch_shape[0] - (coord[2] - z_out_dim[0])
@@ -256,8 +253,7 @@ def heatmap(im, contrast_type, model, patch_shape, mean_train, std_train, brain_
             block = data_im[x_0:x_1, y_0:y_1, zz]
             block_nn = np.expand_dims(np.expand_dims(block, 0), -1)
             block_nn_norm = _normalize_data(block_nn, mean_train, std_train)
-            block_pred = model.run(output_names=CTR_OUTPUT_CHANNEL[contrast_type],
-                                   input_feed={"input_1": block_nn_norm})[0]
+            block_pred = model.run(output_names=["predictions"], input_feed={"input_1": block_nn_norm})[0]
 
             # coordinates manipulation due to the above padding and cropping
             if x_1 > data.shape[0]:
@@ -329,8 +325,6 @@ def segment_2d(model_fname, contrast_type, input_size, im_in):
 
     :return: seg_crop.data: ndarray float32: Output prediction
     """
-    output_channel = {'t1': ['activation_11'], 't2': ['activation_15'],
-                      't2s': ['activation_11'], 'dwi': ['activation_11']}
     ort_sess = ort.InferenceSession(model_fname)
 
     seg_crop = zeros_like(im_in, dtype=np.float32)
@@ -340,7 +334,7 @@ def segment_2d(model_fname, contrast_type, input_size, im_in):
     for zz in range(im_in.dim[2]):
         # 2D CNN prediction
         x = np.expand_dims(np.expand_dims(data_norm[:, :, zz], -1), 0)
-        pred_seg = ort_sess.run(output_names=output_channel[contrast_type], input_feed={"input_1": x})[0][0, :, :, 0]
+        pred_seg = ort_sess.run(output_names=["predictions"], input_feed={"input_1": x})[0][0, :, :, 0]
         seg_crop.data[:, :, zz] = pred_seg
 
     return seg_crop.data
@@ -378,7 +372,7 @@ def segment_3d(model_fname, contrast_type, im_in):
             patch_norm = \
                 _normalize_data(patch_im, dct_patch_sc_3d[contrast_type]['mean'], dct_patch_sc_3d[contrast_type]['std'])
             x = np.expand_dims(np.expand_dims(patch_norm, 0), 0).astype(np.float32)
-            onnx_pred = ort_sess.run(output_names=["activation_7"], input_feed={"input_1": x})
+            onnx_pred = ort_sess.run(output_names=["predictions"], input_feed={"input_1": x})
             # pred_seg_th = (patch_pred_proba > 0.5).astype(int)[0, 0, :, :, :]
             pred_seg_th = onnx_pred[0][0, 0, :, :, :]  # TODO: clarified variable (this is not thresholded!)
 
