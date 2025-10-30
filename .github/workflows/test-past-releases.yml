@@ -98,7 +98,15 @@ jobs:
 
       - name: Install SCT (Unix + WSL)
         if: runner.os != 'Windows' || matrix.os_type == 'wsl'
-        run: ./install_sct -y
+        run: |
+          # NB: These steps ensure that we aren't installing SCT to the Windows partition on WSL
+          # This addresses many issues that stem from crossing the linux/windows boundary:
+          #  - https://github.com/spinalcordtoolbox/spinalcordtoolbox/issues/3564
+          #  - https://github.com/spinalcordtoolbox/spinalcordtoolbox/issues/4816
+          cd ..
+          cp -r spinalcordtoolbox ~ || true # in the case of linux/macos, this will do nothing (same file)
+          cd ~/spinalcordtoolbox
+          ./install_sct -y
 
       - name: Force Python 3.7 (Windows, SCT v5.7)
         if: runner.os == 'Windows' && matrix.sct_version == '5.7' && matrix.os_type == 'native'
