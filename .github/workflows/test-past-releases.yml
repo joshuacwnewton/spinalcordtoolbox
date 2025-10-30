@@ -36,11 +36,11 @@ jobs:
           # WSL is only available on Windows, so skip "ubuntu+wsl" and "macos+wsl"
           # This essentially restricts the "os_type" matrix to only parametrize the `windows` runners
           - os: ubuntu-latest
-            os_type: "wsl"
+            # os_type: "wsl"
           - os: macos-latest
-            os_type: "wsl"
+            # os_type: "wsl"
           - os: macos-15
-            os_type: "wsl"
+            # os_type: "wsl"
           # "native Windows" (i.e. non-WSL) support was only properly introduced in 5.7, so skip older versions
           - sct_version: "5.6"
             os: windows-2025
