@@ -119,8 +119,11 @@ jobs:
         shell: cmd
         run: install_sct.bat
 
-      - name: Update environment variables (Unix + WSL)
-        if: runner.os != 'Windows' || matrix.os_type == 'wsl'
+      # NB: If we try to include WSL here, we get a "GITHUB_ENV: unbound variable" error
+      #     I couldn't find an issue about this on the `https://github.com/Vampire/setup-wsl/` repo
+      #     So, for now, I'm just going to manually include the path updates for WSL.
+      - name: Update environment variables (Unix + *NOT* WSL)
+        if: runner.os != 'Windows'
         run: |
             # NB: install_sct edits ~/.bashrc, but those environment changes don't get passed to subsequent steps in GH Actions.
             # So, we filter through the .bashrc and pass the values to $GITHUB_ENV and $GITHUB_PATH.
@@ -148,7 +151,9 @@ jobs:
       - name: Check dependencies
         # windows + SCT v5.7 fails with a DLL error here, but I'm not sure if that impacts the tests too, so continue
         continue-on-error: true
-        run: sct_check_dependencies
+        run: |
+          export PATH=/root/sct_${{ matrix.sct_version }}/bin:$PATH  # hacky workaround for WSL $PATH issue
+          sct_check_dependencies
 
       # Run tests using 'sct_testing' for all versions except v5.4
       #  -  <5.4 (sct_testing was a custom testing framework)
@@ -157,6 +162,7 @@ jobs:
       - name: Run tests (UNIX + WSL)
         if: (runner.os != 'Windows' || matrix.os_type == 'wsl') && matrix.sct_version != '5.4'
         run: |
+          export PATH=/root/sct_${{ matrix.sct_version }}/bin:$PATH  # hacky workaround for WSL $PATH issue
           sct_testing
       - name: Run tests (native Windows 2025)
         if: (runner.os == 'Windows' && matrix.os_type == 'native') && matrix.sct_version != '5.4'
