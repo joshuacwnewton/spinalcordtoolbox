@@ -150,20 +150,26 @@ jobs:
         continue-on-error: true
         run: sct_check_dependencies
 
-      # In SCT v5.4, the `sct_testing` testing framework was taken away, replaced with pytest.
-      # But, in SCT v5.5, the `sct_testing` name was re-used as an alias for pytest.
-      # This means that, for only v5.4, we need to run the tests differently by calling pytest directly.
-      - name: Run tests (v5.4)
-        if: matrix.sct_version == '5.4'
-        run: ./python/envs/venv_sct/bin/pytest ./testing
-      - name: Run tests (non-v5.4)
-        if: matrix.sct_version != '5.4' && matrix.os != 'windows-2025'
-        run: sct_testing
+      # Run tests using 'sct_testing' for all versions except v5.4
+      #  -  <5.4 (sct_testing was a custom testing framework)
+      #  - ==5.4 (requires special syntax, see below)
+      #  -  >5.4 (sct_testing became an alias for pytest)
+      - name: Run tests (UNIX + WSL)
+        if: (runner.os != 'Windows' || matrix.os_type == 'wsl') && matrix.sct_version != '5.4'
+        run: |
+          sct_testing
+      - name: Run tests (native Windows 2025)
+        if: (runner.os == 'Windows' && matrix.os_type == 'native') && matrix.sct_version != '5.4'
+        run: |
+          # The model `seg_sc_t2star` is failing on Windows 2025, but not on other platforms.
+          # It seems to produce non-deterministic outputs with varying Dice scores between runs.
+          # However, this model has been retired in v7.0, and was not really used even when it
+          # was available. So, we can just skip the test when running "old release" tests on Windows 2025.
+          sct_testing -k 'not (test_segment_nifti and seg_sc_t2star)'
 
-      # The model `seg_sc_t2star` is failing on Windows 2025, but not on other platforms.
-      # It seems to produce non-deterministic outputs with varying Dice scores between runs.
-      # However, this model has been retired in v7.0, and was not really used even when it
-      # was available. So, we can just skip the test when running tests on Windows 2025.
-      - name: Run tests (non-v5.4, Windows 2025)
-        if: matrix.sct_version != '5.4' && matrix.os == 'windows-2025'
-        run: sct_testing -k 'not (test_segment_nifti and seg_sc_t2star)'
+      # Run tests using `./bin/pytest` for v5.4 only
+      - name: Run tests (special syntax for v5.4 only)
+        if: matrix.sct_version == '5.4'
+        run: |
+          # Note: `bin/` isn't supported on native Windows, but SCT v5.4 only runs on Unix-like platforms anyway, so we are fine.
+          ./python/envs/venv_sct/bin/pytest ./testing
